@@ -1,134 +1,123 @@
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatch-vcs", "hatchling"]
+requires = [ "hatch-vcs", "hatchling" ]
 
 [project]
 name = "hydra-sweeper-explicit"
 description = "Hydra sweeper for explicit parameter combinations without Cartesian product"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.12"
-authors = [
-    { name = "Marius Lange" },
-]
-maintainers = [
-    { name = "Marius Lange" },
-]
 keywords = [
-    "hydra",
-    "sweeper",
-    "hyperparameter",
-    "machine-learning",
+  "hydra",
+  "hyperparameter",
+  "machine-learning",
+  "sweeper",
 ]
+license = "MIT"
+maintainers = [
+  { name = "Marius Lange" },
+]
+authors = [
+  { name = "Marius Lange" },
+]
+requires-python = ">=3.12"
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Scientific/Engineering",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
 ]
-dynamic = ["version"]
+dynamic = [ "version" ]
 dependencies = [
-    "hydra-core>=1.3",
-    "omegaconf>=2.3",
+  "hydra-core>=1.3",
+  "omegaconf>=2.3",
 ]
 
-[project.urls]
-Documentation = "https://github.com/quadbio/hydra-sweeper-explicit#readme"
-Issues = "https://github.com/quadbio/hydra-sweeper-explicit/issues"
-Source = "https://github.com/quadbio/hydra-sweeper-explicit"
-
-[project.optional-dependencies]
-dev = [
-    "pre-commit",
+optional-dependencies.dev = [
+  "pre-commit",
 ]
-test = [
-    "pytest>=8.0",
-    "pytest-cov>=4.0",
+optional-dependencies.test = [
+  "pytest>=8",
+  "pytest-cov>=4",
 ]
-
+urls.Documentation = "https://github.com/quadbio/hydra-sweeper-explicit#readme"
+urls.Issues = "https://github.com/quadbio/hydra-sweeper-explicit/issues"
+urls.Source = "https://github.com/quadbio/hydra-sweeper-explicit"
 # Entry point for Hydra plugin discovery
-[project.entry-points."hydra.sweeper"]
-explicit = "hydra_sweeper_explicit:ExplicitSweeper"
-
-[project.entry-points."hydra.searchpath"]
-explicit = "hydra_sweeper_explicit._searchpath:ExplicitSweeperSearchPathPlugin"
-
+entry-points."hydra.searchpath".explicit = "hydra_sweeper_explicit._searchpath:ExplicitSweeperSearchPathPlugin"
 # ---- Hatch environments ----
+entry-points."hydra.sweeper".explicit = "hydra_sweeper_explicit:ExplicitSweeper"
+
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.envs.default]
 installer = "uv"
-features = ["dev"]
+features = [ "dev" ]
 
 [tool.hatch.envs.hatch-test]
-features = ["dev", "test"]
+features = [ "dev", "test" ]
 
 [[tool.hatch.envs.hatch-test.matrix]]
-python = ["3.12", "3.13"]
+python = [ "3.12", "3.13" ]
 
 # ---- Ruff ----
+
 [tool.ruff]
 line-length = 120
 
-[tool.ruff.format]
-docstring-code-format = true
-
-[tool.ruff.lint]
-select = [
-    "F",  # Errors detected by Pyflakes
-    "E",  # Error detected by Pycodestyle
-    "W",  # Warning detected by Pycodestyle
-    "I",  # isort
-    "D",  # pydocstyle
-    "B",  # flake8-bugbear
-    "TID",  # flake8-tidy-imports
-    "C4",  # flake8-comprehensions
-    "BLE",  # flake8-blind-except
-    "UP",  # pyupgrade
-    "RUF100",  # Report unused noqa directives
+format.docstring-code-format = true
+lint.select = [
+  "B",      # flake8-bugbear
+  "BLE",    # flake8-blind-except
+  "C4",     # flake8-comprehensions
+  "D",      # pydocstyle
+  "E",      # Error detected by Pycodestyle
+  "F",      # Errors detected by Pyflakes
+  "I",      # isort
+  "RUF100", # Report unused noqa directives
+  "TID",    # flake8-tidy-imports
+  "UP",     # pyupgrade
+  "W",      # Warning detected by Pycodestyle
 ]
-ignore = [
-    # line too long -> we accept long comment lines
-    "E501",
-    # Do not assign a lambda expression, use a def -> lambda expression assignments are fine
-    "E731",
-    # Missing docstring in public module
-    "D100",
-    # Missing docstring in public package
-    "D104",
-    # Missing docstring in __init__
-    "D107",
-    # Errors from function calls in argument defaults
-    "B008",
-    # first line should be in imperative mood
-    "D401",
+lint.ignore = [
+  # Errors from function calls in argument defaults
+  "B008",
+  # Missing docstring in public module
+  "D100",
+  # Missing docstring in public package
+  "D104",
+  # Missing docstring in __init__
+  "D107",
+  # first line should be in imperative mood
+  "D401",
+  # line too long -> we accept long comment lines
+  "E501",
+  # Do not assign a lambda expression, use a def -> lambda expression assignments are fine
+  "E731",
 ]
-
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["D"]
-"*/__init__.py" = ["F401"]
+lint.per-file-ignores."*/__init__.py" = [ "F401" ]
 
 # ---- Coverage ----
+lint.per-file-ignores."tests/*" = [ "D" ]
+lint.pydocstyle.convention = "numpy"
+
+[tool.pytest.ini_options]
+testpaths = [ "tests" ]
+xfail_strict = true
+
 [tool.coverage.run]
-source = ["hydra_sweeper_explicit"]
-omit = ["**/test_*.py"]
+source = [ "hydra_sweeper_explicit" ]
+omit = [ "**/test_*.py" ]
 
 [tool.coverage.report]
 exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
 ]
 
 # ---- Pytest ----
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-xfail_strict = true
