@@ -1,5 +1,5 @@
 # @package _global_
 hydra:
   sweeper:
-    _target_: hydra_plugins.hydra_sweeper_explicit.ExplicitSweeper
+    _target_: hydra_plugins.hydra_sweeper_explicit._sweeper.ExplicitSweeper
     combinations: []
