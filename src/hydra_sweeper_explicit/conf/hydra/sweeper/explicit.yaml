@@ -1,5 +1,0 @@
-# @package _global_
-hydra:
-  sweeper:
-    _target_: hydra_sweeper_explicit.ExplicitSweeper
-    combinations: []

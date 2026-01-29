@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from omegaconf import DictConfig, OmegaConf
 
-from hydra_sweeper_explicit import ExplicitSweeper
+from hydra_plugins.hydra_sweeper_explicit import ExplicitSweeper
 
 
 class TestExplicitSweeper:

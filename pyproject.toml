@@ -47,13 +47,12 @@ optional-dependencies.test = [
 urls.Documentation = "https://github.com/quadbio/hydra-sweeper-explicit#readme"
 urls.Issues = "https://github.com/quadbio/hydra-sweeper-explicit/issues"
 urls.Source = "https://github.com/quadbio/hydra-sweeper-explicit"
-# Entry point for Hydra plugin discovery
-entry-points."hydra.searchpath".explicit = "hydra_sweeper_explicit._searchpath:ExplicitSweeperSearchPathPlugin"
-# ---- Hatch environments ----
-entry-points."hydra.sweeper".explicit = "hydra_sweeper_explicit:ExplicitSweeper"
 
 [tool.hatch.version]
 source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/hydra_plugins" ]
 
 [tool.hatch.envs.default]
 installer = "uv"
@@ -111,7 +110,7 @@ testpaths = [ "tests" ]
 xfail_strict = true
 
 [tool.coverage.run]
-source = [ "hydra_sweeper_explicit" ]
+source = [ "hydra_plugins/hydra_sweeper_explicit" ]
 omit = [ "**/test_*.py" ]
 
 [tool.coverage.report]

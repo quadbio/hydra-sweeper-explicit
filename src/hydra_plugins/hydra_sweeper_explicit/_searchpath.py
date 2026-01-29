@@ -9,4 +9,7 @@ class ExplicitSweeperSearchPathPlugin(SearchPathPlugin):
 
     def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
         """Add the package's config directory to the search path."""
-        search_path.append(provider="hydra-sweeper-explicit", path="pkg://hydra_sweeper_explicit.conf")
+        search_path.append(
+            provider="hydra-sweeper-explicit",
+            path="pkg://hydra_plugins.hydra_sweeper_explicit.conf",
+        )
