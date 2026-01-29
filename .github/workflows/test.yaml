@@ -27,7 +27,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
       - name: Run tests
-        run: uv run --python ${{ matrix.python }} pytest -v --cov --cov-report=xml
+        run: uv run --python ${{ matrix.python }} --extra test pytest -v --cov --cov-report=xml
       - uses: codecov/codecov-action@v5
         if: matrix.python == '3.12'
         with:
