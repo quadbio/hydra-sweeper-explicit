@@ -3,3 +3,10 @@ hydra:
   sweeper:
     _target_: hydra_plugins.hydra_sweeper_explicit._sweeper.ExplicitSweeper
     combinations: []
+    # Seeds to expand each combination with. Options:
+    # - List of ints: [42, 43, 44]
+    # - Single int N: uses seeds 0 to N-1
+    # - null: no seed expansion (default)
+    seeds: null
+    # Config key for the seed parameter
+    seed_key: seed
