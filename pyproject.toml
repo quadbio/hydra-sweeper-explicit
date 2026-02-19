@@ -41,8 +41,9 @@ optional-dependencies.dev = [
   "pre-commit",
 ]
 optional-dependencies.test = [
+  "coverage>=7.10",
   "pytest>=8",
-  "pytest-cov>=4",
+  "pytest-cov",     # for VS Code's coverage functionality
 ]
 urls.Documentation = "https://github.com/quadbio/hydra-sweeper-explicit#readme"
 urls.Issues = "https://github.com/quadbio/hydra-sweeper-explicit/issues"
@@ -61,8 +62,22 @@ features = [ "dev" ]
 [tool.hatch.envs.hatch-test]
 features = [ "dev", "test" ]
 
+# Test both supported Python versions with normal deps
 [[tool.hatch.envs.hatch-test.matrix]]
+deps = [ "stable" ]
 python = [ "3.12", "3.13" ]
+
+# Test the newest supported Python version also with pre-release deps
+[[tool.hatch.envs.hatch-test.matrix]]
+deps = [ "pre" ]
+python = [ "3.13" ]
+
+# If the matrix variable `deps` is set to "pre",
+# set the environment variable `UV_PRERELEASE` to "allow".
+[tool.hatch.envs.hatch-test.overrides]
+matrix.deps.env-vars = [
+  { key = "UV_PRERELEASE", value = "allow", if = [ "pre" ] },
+]
 
 # ---- Ruff ----
 
@@ -100,17 +115,23 @@ lint.ignore = [
   "E731",
 ]
 lint.per-file-ignores."*/__init__.py" = [ "F401" ]
-
-# ---- Coverage ----
 lint.per-file-ignores."tests/*" = [ "D" ]
+# ---- Pytest ----
+
 lint.pydocstyle.convention = "numpy"
 
-[tool.pytest.ini_options]
+[tool.pytest]
+strict = true
 testpaths = [ "tests" ]
-xfail_strict = true
+addopts = [
+  "--import-mode=importlib",
+]
+
+# ---- Coverage ----
 
 [tool.coverage.run]
-source = [ "hydra_plugins/hydra_sweeper_explicit" ]
+source = [ "hydra_plugins.hydra_sweeper_explicit" ]
+patch = [ "subprocess" ]
 omit = [ "**/test_*.py" ]
 
 [tool.coverage.report]
@@ -118,5 +139,3 @@ exclude_lines = [
   "pragma: no cover",
   "if TYPE_CHECKING:",
 ]
-
-# ---- Pytest ----
