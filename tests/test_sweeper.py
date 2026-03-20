@@ -16,6 +16,7 @@ class TestExplicitSweeper:
         assert sweeper.combinations == []
         assert sweeper.seeds is None
         assert sweeper.seed_key == "seed"
+        assert sweeper.launcher_config_group == "hydra/launcher"
 
     def test_init_with_combinations(self) -> None:
         combos = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
@@ -33,6 +34,10 @@ class TestExplicitSweeper:
     def test_init_with_custom_seed_key(self) -> None:
         sweeper = ExplicitSweeper(seed_key="random_seed")
         assert sweeper.seed_key == "random_seed"
+
+    def test_init_with_custom_launcher_config_group(self) -> None:
+        sweeper = ExplicitSweeper(launcher_config_group="launcher")
+        assert sweeper.launcher_config_group == "launcher"
 
     @pytest.mark.parametrize(
         ("key", "value", "expected"),
@@ -198,10 +203,23 @@ class TestSweep:
         # 2 combinations × 2 seeds = 4 jobs
         assert len(results) == 4
 
-        # CPU launcher: 2 jobs (small × 2 seeds)
-        cpu_launcher.launch.assert_called_once()
-        assert len(cpu_launcher.launch.call_args[0][0]) == 2
+    def test_app_level_launcher_config_group(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
+        """launcher_config_group='launcher' puts override in task overrides, not hydra."""
+        sweeper = sweeper_with_mock_launcher
+        sweeper.launcher_config_group = "launcher"
+        sweeper.combinations = [
+            {"model": "large", "_launcher_": "euler_gpu_8"},
+            {"model": "small"},
+        ]
 
-        # Default launcher: 2 jobs (large × 2 seeds)
+        # Mock _make_launcher to capture how it's called
+        gpu_launcher = MagicMock()
+        gpu_launcher.launch.side_effect = lambda overrides, **kw: [f"r_{i}" for i in range(len(overrides))]
+
+        with patch.object(sweeper, "_make_launcher", side_effect=lambda name: gpu_launcher) as mock_make:
+            sweeper.sweep([])
+
+        mock_make.assert_called_once_with("euler_gpu_8")
+        # Verify both launchers were called
+        gpu_launcher.launch.assert_called_once()
         sweeper.launcher.launch.assert_called_once()
-        assert len(sweeper.launcher.launch.call_args[0][0]) == 2

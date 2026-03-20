@@ -74,6 +74,11 @@ class ExplicitSweeper(Sweeper):
         - None: no seed expansion (default)
     seed_key
         The config key to use for the seed parameter. Default: "seed"
+    launcher_config_group
+        Hydra config group path for launcher configs used in ``_launcher_``
+        overrides. Default: ``"hydra/launcher"`` (standard Hydra pattern).
+        Set to ``"launcher"`` if your launcher configs live at
+        ``configs/launcher/`` with ``@package _global_``.
     max_batch_size
         Ignored, for compatibility with BasicSweeper config.
     params
@@ -102,12 +107,14 @@ class ExplicitSweeper(Sweeper):
         combinations: list[dict[str, Any]] | None = None,
         seeds: list[int] | int | None = None,
         seed_key: str = "seed",
+        launcher_config_group: str = "hydra/launcher",
         max_batch_size: int | None = None,  # Ignored, for compatibility
         params: dict[str, str] | None = None,  # Ignored, for compatibility
     ) -> None:
         self.combinations = list(combinations) if combinations else []
         self.seeds = seeds
         self.seed_key = seed_key
+        self.launcher_config_group = launcher_config_group
         self.config: DictConfig | None = None
         self.launcher: Any = None
         self.hydra_context: HydraContext | None = None
@@ -147,6 +154,10 @@ class ExplicitSweeper(Sweeper):
         if hasattr(sweeper_cfg, "seed_key") and sweeper_cfg.seed_key:
             self.seed_key = sweeper_cfg.seed_key
 
+        # Load launcher_config_group from config if available
+        if hasattr(sweeper_cfg, "launcher_config_group") and sweeper_cfg.launcher_config_group:
+            self.launcher_config_group = sweeper_cfg.launcher_config_group
+
     def _resolve_seeds(self) -> list[int] | None:
         """Resolve seeds specification to a list of integers.
 
@@ -177,17 +188,24 @@ class ExplicitSweeper(Sweeper):
     def _make_launcher(self, launcher_name: str) -> Any:
         """Instantiate a launcher for a different launcher config group.
 
-        Re-composes the full Hydra config with ``hydra/launcher=<launcher_name>``
-        and creates a new launcher instance from it.
+        Re-composes the full Hydra config with the launcher override and creates
+        a new launcher instance from it. The config group path is controlled by
+        ``launcher_config_group`` (default ``"hydra/launcher"``).
         """
-        # Reconstruct original overrides, replacing the launcher
+        group = self.launcher_config_group
+        is_hydra_group = group.startswith("hydra/")
+
+        # Reconstruct original overrides, adding the launcher to the right list
         task_overrides = list(OmegaConf.to_container(self.config.hydra.overrides.task, resolve=False))
-        hydra_overrides = [
-            o
-            for o in OmegaConf.to_container(self.config.hydra.overrides.hydra, resolve=False)
-            if not o.startswith("hydra/launcher=")
-        ]
-        hydra_overrides.append(f"hydra/launcher={launcher_name}")
+        hydra_overrides = list(OmegaConf.to_container(self.config.hydra.overrides.hydra, resolve=False))
+
+        override = f"{group}={launcher_name}"
+        if is_hydra_group:
+            hydra_overrides = [o for o in hydra_overrides if not o.startswith(f"{group}=")]
+            hydra_overrides.append(override)
+        else:
+            task_overrides = [o for o in task_overrides if not o.startswith(f"{group}=")]
+            task_overrides.append(override)
 
         new_config = self.hydra_context.config_loader.load_configuration(
             config_name=self.config.hydra.job.config_name,
