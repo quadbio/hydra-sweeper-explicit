@@ -86,48 +86,11 @@ class TestExplicitSweeper:
 class TestExplicitSweeperIntegration:
     """Integration tests requiring Hydra context."""
 
-    @pytest.fixture
-    def mock_config(self) -> DictConfig:
-        """Create a minimal Hydra config for testing."""
-        return OmegaConf.create(
-            {
-                "hydra": {
-                    "sweeper": {
-                        "_target_": "hydra_sweeper_explicit.ExplicitSweeper",
-                        "combinations": [
-                            {"sampling": "independent"},
-                            {"sampling": "ot", "sparsify.mass_threshold": 0.5},
-                        ],
-                    }
-                }
-            }
-        )
-
-    @pytest.fixture
-    def mock_config_with_seeds(self) -> DictConfig:
-        """Create a Hydra config with seeds for testing."""
-        return OmegaConf.create(
-            {
-                "hydra": {
-                    "sweeper": {
-                        "_target_": "hydra_sweeper_explicit.ExplicitSweeper",
-                        "combinations": [
-                            {"sampling": "independent"},
-                            {"sampling": "ot"},
-                        ],
-                        "seeds": [42, 43],
-                        "seed_key": "seed",
-                    }
-                }
-            }
-        )
-
     def test_combinations_from_config(self, mock_config: DictConfig) -> None:
         """Test loading combinations from Hydra config during setup."""
         sweeper = ExplicitSweeper()
         assert sweeper.combinations == []
 
-        # The combinations should be accessible from the config
         combos = mock_config.hydra.sweeper.combinations
         assert len(combos) == 2
         assert OmegaConf.to_container(combos[0]) == {"sampling": "independent"}
@@ -143,15 +106,6 @@ class TestExplicitSweeperIntegration:
 
 class TestLauncherGrouping:
     """Tests for _launcher_ key handling in sweep()."""
-
-    @pytest.fixture
-    def sweeper_with_mock_launcher(self) -> ExplicitSweeper:
-        """Create a sweeper with a mocked default launcher."""
-        sweeper = ExplicitSweeper()
-        sweeper.launcher = MagicMock()
-        # Default launcher returns a result per job
-        sweeper.launcher.launch.side_effect = lambda overrides, **kw: [f"result_{i}" for i in range(len(overrides))]
-        return sweeper
 
     def test_launcher_stripped_from_overrides(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
         """_launcher_ key must not appear in overrides passed to launcher.launch()."""
