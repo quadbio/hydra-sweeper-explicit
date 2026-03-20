@@ -10,3 +10,7 @@ hydra:
     seeds: null
     # Config key for the seed parameter
     seed_key: seed
+    # Config group path for launcher configs referenced by _launcher_.
+    # Default "hydra/launcher" for standard Hydra layout. Set to "launcher"
+    # if your launcher configs live at configs/launcher/ with @package _global_.
+    launcher_config_group: hydra/launcher
