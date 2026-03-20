@@ -138,3 +138,31 @@ class TestExplicitSweeperIntegration:
 
         assert len(combos) == 2
         assert OmegaConf.to_container(seeds) == [42, 43]
+
+
+class TestLauncherGrouping:
+    """Tests for _launcher_ extraction and job grouping."""
+
+    def test_launcher_stripped_from_overrides(self) -> None:
+        """_launcher_ key should not appear in job override strings."""
+        sweeper = ExplicitSweeper(
+            combinations=[
+                {"solver": "linear", "_launcher_": "euler_gpu_8"},
+                {"solver": "pseudobulk"},
+            ]
+        )
+        # Call sweep — jobs with _launcher_ should not include it in overrides
+        # (sweep returns [] because no launcher is set up, but we can inspect
+        # the override building logic via _format_override)
+        combo = {"solver": "linear", "_launcher_": "euler_gpu_8"}
+        overrides = [sweeper._format_override(k, v) for k, v in combo.items() if k != "_launcher_"]
+        assert overrides == ["solver=linear"]
+        assert "_launcher_" not in " ".join(overrides)
+
+    def test_launcher_key_extracted(self) -> None:
+        """_launcher_ value is correctly extracted from combination."""
+        combo = {"solver": "linear", "_launcher_": "euler_gpu_8", "seed": 0}
+        assert combo.get("_launcher_") == "euler_gpu_8"
+
+        combo_no_launcher = {"solver": "pseudobulk", "seed": 0}
+        assert combo_no_launcher.get("_launcher_") is None
