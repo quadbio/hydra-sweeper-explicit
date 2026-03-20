@@ -1,8 +1,8 @@
 """Explicit Sweeper - runs exact parameter combinations without Cartesian product.
 
 Hydra's BasicSweeper always computes the Cartesian product of all sweep parameters,
-which leads to invalid combinations when parameters are dependent (e.g., sparsify
-settings only make sense when sampling=ot).
+which leads to invalid combinations when parameters are dependent (e.g., certain
+settings only make sense with a specific model or backend).
 
 This sweeper lets you define explicit combinations:
 
@@ -10,11 +10,11 @@ This sweeper lets you define explicit combinations:
       sweeper:
         _target_: hydra_sweeper_explicit.ExplicitSweeper
         combinations:
-          - {sampling: independent}
-          - {sampling: ot, sparsify.mass_threshold: 0.5}
-          - {sampling: ot, sparsify.mass_threshold: 0.9}
+          - {model: small}
+          - {model: large, optimizer.lr: 0.001}
+          - {model: large, optimizer.lr: 0.01}
 
-Each dict in `combinations` becomes one job with exactly those overrides.
+Each dict in ``combinations`` becomes one job with exactly those overrides.
 
 Optionally, expand each combination across multiple seeds:
 
@@ -23,21 +23,33 @@ Optionally, expand each combination across multiple seeds:
         seeds: [42, 43, 44]  # or seeds: 5 for seeds 0-4
         seed_key: seed       # parameter name (default: "seed")
         combinations:
-          - {sampling: independent}
-          - {sampling: ot}
+          - {model: small}
+          - {model: large}
 
 This creates 6 jobs: 2 combinations × 3 seeds.
 
+Per-combination launcher overrides (for heterogeneous compute resources):
+
+    hydra:
+      sweeper:
+        combinations:
+          - {model: large, _launcher_: slurm_gpu}
+          - {model: small, _launcher_: slurm_cpu}
+
+Jobs are grouped by ``_launcher_`` and each group is submitted with its own
+launcher instance. Combinations without ``_launcher_`` use the default launcher.
+
 Usage:
-    python run_experiment.py --multirun hydra/sweeper=explicit +sweep=my_sweep
+    python my_app.py --multirun hydra/sweeper=explicit
 """
 
 import logging
+from collections import defaultdict
 from typing import Any
 
 from hydra.core.plugins import Plugins
 from hydra.plugins.sweeper import Sweeper
-from hydra.types import HydraContext, TaskFunction
+from hydra.types import HydraContext, RunMode, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 
 log = logging.getLogger(__name__)
@@ -70,17 +82,17 @@ class ExplicitSweeper(Sweeper):
     Example
     -------
     combinations:
-      - {datamodule: independent}
-      - {datamodule: ot, sparsify.mass_threshold: 0.5}
-      - {datamodule: ot, sparsify.mass_threshold: 0.9}
+      - {model: small}
+      - {model: large, optimizer.lr: 0.001}
+      - {model: large, optimizer.lr: 0.01}
 
     This runs exactly 3 jobs, not a Cartesian product.
 
     With seeds:
       seeds: [42, 43]
       combinations:
-        - {datamodule: independent}
-        - {datamodule: ot}
+        - {model: small}
+        - {model: large}
 
     This runs 4 jobs: 2 combinations × 2 seeds.
     """
@@ -110,6 +122,7 @@ class ExplicitSweeper(Sweeper):
         """Set up the sweeper with Hydra context."""
         self.config = config
         self.hydra_context = hydra_context
+        self.task_function = task_function
         self.launcher = Plugins.instance().instantiate_launcher(
             hydra_context=hydra_context,
             task_function=task_function,
@@ -161,6 +174,34 @@ class ExplicitSweeper(Sweeper):
         else:
             return f"{key}={value}"
 
+    def _make_launcher(self, launcher_name: str) -> Any:
+        """Instantiate a launcher for a different launcher config group.
+
+        Re-composes the full Hydra config with ``hydra/launcher=<launcher_name>``
+        and creates a new launcher instance from it.
+        """
+        # Reconstruct original overrides, replacing the launcher
+        task_overrides = list(OmegaConf.to_container(self.config.hydra.overrides.task, resolve=False))
+        hydra_overrides = [
+            o
+            for o in OmegaConf.to_container(self.config.hydra.overrides.hydra, resolve=False)
+            if not o.startswith("hydra/launcher=")
+        ]
+        hydra_overrides.append(f"hydra/launcher={launcher_name}")
+
+        new_config = self.hydra_context.config_loader.load_configuration(
+            config_name=self.config.hydra.job.config_name,
+            overrides=task_overrides + hydra_overrides,
+            run_mode=RunMode.MULTIRUN,
+            from_shell=False,
+        )
+
+        return Plugins.instance().instantiate_launcher(
+            hydra_context=self.hydra_context,
+            task_function=self.task_function,
+            config=new_config,
+        )
+
     def sweep(self, arguments: list[str]) -> Any:
         """Execute the sweep with explicit combinations.
 
@@ -180,22 +221,21 @@ class ExplicitSweeper(Sweeper):
         # Resolve seeds
         seeds = self._resolve_seeds()
 
-        # Build job overrides for each combination (optionally × seeds)
-        job_overrides: list[list[str]] = []
+        # Build job overrides for each combination (optionally × seeds),
+        # tracking which launcher each job belongs to.
+        # Each entry is (launcher_name | None, [override_strings]).
+        tagged_jobs: list[tuple[str | None, list[str]]] = []
 
         for combo in self.combinations:
+            launcher_name = combo.get("_launcher_")
+            overrides_base = [self._format_override(k, v) for k, v in combo.items() if k != "_launcher_"]
+
             if seeds is not None:
-                # Expand combination across all seeds
                 for seed in seeds:
-                    overrides = [self._format_override(k, v) for k, v in combo.items()]
-                    overrides.append(self._format_override(self.seed_key, seed))
-                    overrides.extend(arguments)
-                    job_overrides.append(overrides)
+                    overrides = [*overrides_base, self._format_override(self.seed_key, seed), *arguments]
+                    tagged_jobs.append((launcher_name, overrides))
             else:
-                # Single job for this combination
-                overrides = [self._format_override(k, v) for k, v in combo.items()]
-                overrides.extend(arguments)
-                job_overrides.append(overrides)
+                tagged_jobs.append((launcher_name, [*overrides_base, *arguments]))
 
         # Log job summary
         if seeds is not None:
@@ -203,14 +243,37 @@ class ExplicitSweeper(Sweeper):
                 "ExplicitSweeper: %d combinations × %d seeds = %d jobs",
                 len(self.combinations),
                 len(seeds),
-                len(job_overrides),
+                len(tagged_jobs),
             )
         else:
-            log.info("ExplicitSweeper: Launching %d jobs", len(job_overrides))
+            log.info("ExplicitSweeper: Launching %d jobs", len(tagged_jobs))
 
-        for i, overrides in enumerate(job_overrides):
-            log.info("Job %d: %s", i, " ".join(overrides))
+        for i, (_launcher, overrides) in enumerate(tagged_jobs):
+            suffix = f" [launcher={_launcher}]" if _launcher else ""
+            log.info("Job %d: %s%s", i, " ".join(overrides), suffix)
 
-        # Launch all jobs
-        returns = self.launcher.launch(job_overrides, initial_job_idx=0)
-        return returns
+        # Group jobs by launcher, preserving order of first appearance
+        groups: defaultdict[str | None, list[tuple[int, list[str]]]] = defaultdict(list)
+        for i, (launcher_name, overrides) in enumerate(tagged_jobs):
+            groups[launcher_name].append((i, overrides))
+
+        # Launch each group with its own launcher instance
+        launchers: dict[str | None, Any] = {None: self.launcher}
+        all_returns: list[Any] = [None] * len(tagged_jobs)
+        job_idx = 0
+
+        for launcher_name, jobs in groups.items():
+            if launcher_name is not None and launcher_name not in launchers:
+                log.info("Instantiating launcher: %s", launcher_name)
+                launchers[launcher_name] = self._make_launcher(launcher_name)
+
+            launcher = launchers[launcher_name]
+            group_overrides = [overrides for _, overrides in jobs]
+            group_indices = [idx for idx, _ in jobs]
+
+            returns = launcher.launch(group_overrides, initial_job_idx=job_idx)
+            for idx, ret in zip(group_indices, returns, strict=True):
+                all_returns[idx] = ret
+            job_idx += len(group_overrides)
+
+        return all_returns
