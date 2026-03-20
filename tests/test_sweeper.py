@@ -4,40 +4,33 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from omegaconf import DictConfig, OmegaConf
 
 from hydra_plugins.hydra_sweeper_explicit import ExplicitSweeper
 
 
 class TestExplicitSweeper:
-    """Test suite for ExplicitSweeper."""
+    """Unit tests for individual methods."""
 
-    def test_init_empty(self) -> None:
-        """Test initialization with no combinations."""
+    def test_init_defaults(self) -> None:
         sweeper = ExplicitSweeper()
         assert sweeper.combinations == []
         assert sweeper.seeds is None
         assert sweeper.seed_key == "seed"
 
     def test_init_with_combinations(self) -> None:
-        """Test initialization with combinations."""
         combos = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
         sweeper = ExplicitSweeper(combinations=combos)
         assert sweeper.combinations == combos
 
     def test_init_with_seeds_list(self) -> None:
-        """Test initialization with seed list."""
         sweeper = ExplicitSweeper(seeds=[42, 43, 44])
         assert sweeper.seeds == [42, 43, 44]
 
     def test_init_with_seeds_int(self) -> None:
-        """Test initialization with seed count."""
         sweeper = ExplicitSweeper(seeds=3)
         assert sweeper.seeds == 3
-        assert sweeper._resolve_seeds() == [0, 1, 2]
 
     def test_init_with_custom_seed_key(self) -> None:
-        """Test initialization with custom seed key."""
         sweeper = ExplicitSweeper(seed_key="random_seed")
         assert sweeper.seed_key == "random_seed"
 
@@ -56,69 +49,73 @@ class TestExplicitSweeper:
         ],
     )
     def test_format_override(self, key: str, value: Any, expected: str) -> None:
-        """Test override formatting for various types."""
-        sweeper = ExplicitSweeper()
-        result = sweeper._format_override(key, value)
-        assert result == expected
+        assert ExplicitSweeper()._format_override(key, value) == expected
 
-    def test_sweep_no_combinations(self) -> None:
-        """Test sweep returns empty when no combinations defined."""
-        sweeper = ExplicitSweeper()
-        result = sweeper.sweep([])
-        assert result == []
-
-    def test_resolve_seeds_none(self) -> None:
-        """Test seed resolution with no seeds."""
-        sweeper = ExplicitSweeper()
-        assert sweeper._resolve_seeds() is None
-
-    def test_resolve_seeds_list(self) -> None:
-        """Test seed resolution with list."""
-        sweeper = ExplicitSweeper(seeds=[10, 20, 30])
-        assert sweeper._resolve_seeds() == [10, 20, 30]
-
-    def test_resolve_seeds_int(self) -> None:
-        """Test seed resolution with int."""
-        sweeper = ExplicitSweeper(seeds=5)
-        assert sweeper._resolve_seeds() == [0, 1, 2, 3, 4]
+    @pytest.mark.parametrize(
+        ("seeds", "expected"),
+        [
+            (None, None),
+            (5, [0, 1, 2, 3, 4]),
+            ([10, 20, 30], [10, 20, 30]),
+        ],
+    )
+    def test_resolve_seeds(self, seeds: list[int] | int | None, expected: list[int] | None) -> None:
+        assert ExplicitSweeper(seeds=seeds)._resolve_seeds() == expected
 
 
-class TestExplicitSweeperIntegration:
-    """Integration tests requiring Hydra context."""
+class TestSweep:
+    """Tests for sweep() — dispatch, seeds, CLI arguments, launcher grouping."""
 
-    def test_combinations_from_config(self, mock_config: DictConfig) -> None:
-        """Test loading combinations from Hydra config during setup."""
-        sweeper = ExplicitSweeper()
-        assert sweeper.combinations == []
+    def test_no_combinations(self) -> None:
+        assert ExplicitSweeper().sweep([]) == []
 
-        combos = mock_config.hydra.sweeper.combinations
-        assert len(combos) == 2
-        assert OmegaConf.to_container(combos[0]) == {"sampling": "independent"}
+    def test_basic_dispatch(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
+        """Combinations are forwarded as overrides to the launcher."""
+        sweeper = sweeper_with_mock_launcher
+        sweeper.combinations = [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}]
 
-    def test_seeds_from_config(self, mock_config_with_seeds: DictConfig) -> None:
-        """Test loading seeds from Hydra config."""
-        combos = mock_config_with_seeds.hydra.sweeper.combinations
-        seeds = mock_config_with_seeds.hydra.sweeper.seeds
+        sweeper.sweep([])
 
-        assert len(combos) == 2
-        assert OmegaConf.to_container(seeds) == [42, 43]
+        sweeper.launcher.launch.assert_called_once()
+        overrides = sweeper.launcher.launch.call_args[0][0]
+        assert overrides == [["a=1", "b=x"], ["a=2", "b=y"]]
 
+    def test_seed_expansion(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
+        """Each combination is expanded across all seeds."""
+        sweeper = sweeper_with_mock_launcher
+        sweeper.combinations = [{"model": "a"}, {"model": "b"}]
+        sweeper.seeds = [42, 43]
 
-class TestLauncherGrouping:
-    """Tests for _launcher_ key handling in sweep()."""
+        sweeper.sweep([])
+
+        overrides = sweeper.launcher.launch.call_args[0][0]
+        assert len(overrides) == 4
+        assert overrides[0] == ["model=a", "seed=42"]
+        assert overrides[1] == ["model=a", "seed=43"]
+        assert overrides[2] == ["model=b", "seed=42"]
+        assert overrides[3] == ["model=b", "seed=43"]
+
+    def test_cli_arguments_appended(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
+        """Extra CLI arguments are appended to every job's overrides."""
+        sweeper = sweeper_with_mock_launcher
+        sweeper.combinations = [{"a": 1}]
+
+        sweeper.sweep(["extra=42"])
+
+        overrides = sweeper.launcher.launch.call_args[0][0]
+        assert overrides == [["a=1", "extra=42"]]
 
     def test_launcher_stripped_from_overrides(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
-        """_launcher_ key must not appear in overrides passed to launcher.launch()."""
+        """_launcher_ key must not appear in overrides passed to launch()."""
         sweeper = sweeper_with_mock_launcher
         sweeper.combinations = [
             {"model": "small", "_launcher_": "slurm_cpu"},
             {"model": "large"},
         ]
-        # All jobs use mock default launcher (no real _make_launcher)
+
         with patch.object(sweeper, "_make_launcher", return_value=sweeper.launcher):
             sweeper.sweep([])
 
-        # Collect all overrides from all launch() calls
         all_overrides = []
         for call in sweeper.launcher.launch.call_args_list:
             all_overrides.extend(call[0][0])
@@ -127,7 +124,7 @@ class TestLauncherGrouping:
         assert "_launcher_" not in flat
 
     def test_jobs_grouped_by_launcher(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
-        """Jobs with different _launcher_ values must be dispatched in separate launch() calls."""
+        """Different _launcher_ values dispatch to separate launcher instances."""
         sweeper = sweeper_with_mock_launcher
         sweeper.combinations = [
             {"model": "small", "_launcher_": "slurm_cpu"},
@@ -146,29 +143,25 @@ class TestLauncherGrouping:
         with patch.object(sweeper, "_make_launcher", side_effect=mock_make_launcher):
             sweeper.sweep([])
 
-        # Default launcher gets jobs without _launcher_
+        # Default launcher gets only the untagged job
         assert sweeper.launcher.launch.call_count == 1
-        default_overrides = sweeper.launcher.launch.call_args[0][0]
-        assert default_overrides == [["model=medium"]]
+        assert sweeper.launcher.launch.call_args[0][0] == [["model=medium"]]
 
         # Each custom launcher gets its own group
         cpu_launcher.launch.assert_called_once()
         assert cpu_launcher.launch.call_args[0][0] == [["model=small"]]
-
         gpu_launcher.launch.assert_called_once()
         assert gpu_launcher.launch.call_args[0][0] == [["model=large"]]
 
     def test_results_reassembled_in_original_order(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
-        """Results must be returned in original combination order, not grouped order."""
+        """Results are returned in combination order, not grouped order."""
         sweeper = sweeper_with_mock_launcher
         sweeper.combinations = [
             {"model": "a", "_launcher_": "custom"},
             {"model": "b"},
             {"model": "c", "_launcher_": "custom"},
         ]
-        # Default launcher (for "b")
         sweeper.launcher.launch.side_effect = lambda overrides, **kw: ["result_b"]
-        # Custom launcher (for "a" and "c")
         custom_launcher = MagicMock()
         custom_launcher.launch.side_effect = lambda overrides, **kw: ["result_a", "result_c"]
 
@@ -177,7 +170,7 @@ class TestLauncherGrouping:
 
         assert results == ["result_a", "result_b", "result_c"]
 
-    def test_no_launcher_key_uses_default(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
+    def test_all_default_launcher(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
         """Without _launcher_, all jobs go to the default launcher in one call."""
         sweeper = sweeper_with_mock_launcher
         sweeper.combinations = [{"a": 1}, {"a": 2}, {"a": 3}]
@@ -185,11 +178,10 @@ class TestLauncherGrouping:
         sweeper.sweep([])
 
         sweeper.launcher.launch.assert_called_once()
-        overrides = sweeper.launcher.launch.call_args[0][0]
-        assert len(overrides) == 3
+        assert len(sweeper.launcher.launch.call_args[0][0]) == 3
 
     def test_launcher_with_seeds(self, sweeper_with_mock_launcher: ExplicitSweeper) -> None:
-        """_launcher_ works correctly with seed expansion."""
+        """_launcher_ grouping works with seed expansion."""
         sweeper = sweeper_with_mock_launcher
         sweeper.combinations = [
             {"model": "small", "_launcher_": "cpu"},
@@ -206,13 +198,10 @@ class TestLauncherGrouping:
         # 2 combinations × 2 seeds = 4 jobs
         assert len(results) == 4
 
-        # CPU launcher gets 2 jobs (small × 2 seeds)
+        # CPU launcher: 2 jobs (small × 2 seeds)
         cpu_launcher.launch.assert_called_once()
-        cpu_overrides = cpu_launcher.launch.call_args[0][0]
-        assert len(cpu_overrides) == 2
-        assert all("model=small" in o for overrides in [cpu_overrides] for o in overrides)
+        assert len(cpu_launcher.launch.call_args[0][0]) == 2
 
-        # Default launcher gets 2 jobs (large × 2 seeds)
+        # Default launcher: 2 jobs (large × 2 seeds)
         sweeper.launcher.launch.assert_called_once()
-        default_overrides = sweeper.launcher.launch.call_args[0][0]
-        assert len(default_overrides) == 2
+        assert len(sweeper.launcher.launch.call_args[0][0]) == 2
