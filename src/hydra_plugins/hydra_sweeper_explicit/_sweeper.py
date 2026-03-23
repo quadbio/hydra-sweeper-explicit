@@ -215,6 +215,11 @@ class ExplicitSweeper(Sweeper):
             from_shell=False,
         )
 
+        # Force the same sweep dir as the original config so all launcher
+        # groups write into a single output directory (${now:...} would
+        # otherwise re-resolve to a different timestamp).
+        OmegaConf.update(new_config, "hydra.sweep.dir", self.config.hydra.sweep.dir)
+
         return Plugins.instance().instantiate_launcher(
             hydra_context=self.hydra_context,
             task_function=self.task_function,
