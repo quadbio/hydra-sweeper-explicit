@@ -45,6 +45,7 @@ Usage:
 
 import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from hydra.core.plugins import Plugins
@@ -214,6 +215,12 @@ class ExplicitSweeper(Sweeper):
             from_shell=False,
         )
 
+        # Propagate cached resolver values (especially ${now:...}) from the
+        # original config so all launcher groups resolve to the same timestamp
+        # and share a single output directory.  Hydra's own load_sweep_config
+        # uses this mechanism for the same reason.
+        OmegaConf.copy_cache(from_config=self.config, to_config=new_config)
+
         return Plugins.instance().instantiate_launcher(
             hydra_context=self.hydra_context,
             task_function=self.task_function,
@@ -235,6 +242,11 @@ class ExplicitSweeper(Sweeper):
         if not self.combinations:
             log.warning("ExplicitSweeper: No combinations defined, nothing to run")
             return []
+
+        # Eagerly resolve ${now:...} so the cache entry exists before any
+        # _make_launcher → OmegaConf.copy_cache call.
+        if self.config is not None:
+            _ = self.config.hydra.sweep.dir
 
         # Resolve seeds
         seeds = self._resolve_seeds()
@@ -280,6 +292,8 @@ class ExplicitSweeper(Sweeper):
         all_returns: list[Any] = [None] * len(tagged_jobs)
         job_idx = 0
 
+        # Pre-build (launcher, overrides, indices, job_idx) for each group
+        launch_tasks: list[tuple[Any, list[list[str]], list[int], int]] = []
         for launcher_name, jobs in groups.items():
             if launcher_name is not None and launcher_name not in launchers:
                 log.info("Instantiating launcher: %s", launcher_name)
@@ -288,10 +302,24 @@ class ExplicitSweeper(Sweeper):
             launcher = launchers[launcher_name]
             group_overrides = [overrides for _, overrides in jobs]
             group_indices = [idx for idx, _ in jobs]
-
-            returns = launcher.launch(group_overrides, initial_job_idx=job_idx)
-            for idx, ret in zip(group_indices, returns, strict=True):
-                all_returns[idx] = ret
+            launch_tasks.append((launcher, group_overrides, group_indices, job_idx))
             job_idx += len(group_overrides)
+
+        # Submit all groups concurrently so SLURM jobs hit the queue together,
+        # then wait for all results in parallel.
+        def _launch(task: tuple[Any, list[list[str]], list[int], int]) -> tuple[list[int], list[Any]]:
+            launcher, overrides, indices, idx = task
+            returns = launcher.launch(overrides, initial_job_idx=idx)
+            return indices, list(returns)
+
+        if len(launch_tasks) == 1:
+            indices, returns = _launch(launch_tasks[0])
+            for idx, ret in zip(indices, returns, strict=True):
+                all_returns[idx] = ret
+        else:
+            with ThreadPoolExecutor(max_workers=len(launch_tasks)) as pool:
+                for indices, returns in pool.map(_launch, launch_tasks):
+                    for idx, ret in zip(indices, returns, strict=True):
+                        all_returns[idx] = ret
 
         return all_returns
