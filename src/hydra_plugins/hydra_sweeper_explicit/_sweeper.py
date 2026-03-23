@@ -215,10 +215,11 @@ class ExplicitSweeper(Sweeper):
             from_shell=False,
         )
 
-        # Force the same sweep dir as the original config so all launcher
-        # groups write into a single output directory (${now:...} would
-        # otherwise re-resolve to a different timestamp).
-        OmegaConf.update(new_config, "hydra.sweep.dir", self.config.hydra.sweep.dir)
+        # Propagate cached resolver values (especially ${now:...}) from the
+        # original config so all launcher groups resolve to the same timestamp
+        # and share a single output directory.  Hydra's own load_sweep_config
+        # uses this mechanism for the same reason.
+        OmegaConf.copy_cache(from_config=self.config, to_config=new_config)
 
         return Plugins.instance().instantiate_launcher(
             hydra_context=self.hydra_context,
@@ -241,6 +242,11 @@ class ExplicitSweeper(Sweeper):
         if not self.combinations:
             log.warning("ExplicitSweeper: No combinations defined, nothing to run")
             return []
+
+        # Eagerly resolve ${now:...} so the cache entry exists before any
+        # _make_launcher → OmegaConf.copy_cache call.
+        if self.config is not None:
+            _ = self.config.hydra.sweep.dir
 
         # Resolve seeds
         seeds = self._resolve_seeds()
