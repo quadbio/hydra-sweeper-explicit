@@ -1,6 +1,0 @@
-feat: add `launcher_config_group` parameter
-
-Allow configuring the Hydra config group path for launcher configs
-referenced by `_launcher_`. Defaults to `"hydra/launcher"` (standard
-Hydra pattern). Set to `"launcher"` for app-level launcher configs
-that use `@package _global_`.
